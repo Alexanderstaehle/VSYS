@@ -5,6 +5,7 @@ import aqua.blatt1.common.msgtypes.DeregisterRequest;
 import aqua.blatt1.common.msgtypes.HandoffRequest;
 import aqua.blatt1.common.msgtypes.RegisterRequest;
 import aqua.blatt1.common.msgtypes.RegisterResponse;
+import aqua.blatt2.broker.PoisonPill;
 import messaging.Endpoint;
 import messaging.Message;
 
@@ -22,6 +23,13 @@ public class Broker {
     Boolean stopRequest;
     ExecutorService executor;
     ReadWriteLock lock = new ReentrantReadWriteLock();
+
+    public Broker() {
+        endpoint = new Endpoint(4711);
+        clientList = new ClientCollection();
+        stopRequest = false;
+        executor = Executors.newFixedThreadPool(5);
+    }
 
     private class BrokerTask {
         public void brokerTask(Message msg) {
@@ -42,34 +50,22 @@ public class Broker {
                 handoffFish(msg);
                 lock.writeLock().unlock();
             }
+
+            if (msg.getPayload() instanceof PoisonPill) {
+                System.exit(0);
+            }
         }
-
-    }
-
-    public Broker() {
-        endpoint = new Endpoint(4711);
-        clientList = new ClientCollection();
-        stopRequest = false;
-        executor = Executors.newFixedThreadPool(5);
     }
 
     public void broker() {
-        executor.execute(new Runnable() {
-            @Override
-            public void run() {
-                JOptionPane.showMessageDialog(null, "Ok um Server zu beenden");
-                stopRequest = true;
-            }
+        executor.execute(() -> {
+            JOptionPane.showMessageDialog(null, "Ok um Server zu beenden");
+            stopRequest = true;
         });
         while (!stopRequest) {
             Message msg = endpoint.blockingReceive();
             BrokerTask brokerTask = new BrokerTask();
-            executor.execute(new Runnable() {
-                @Override
-                public void run() {
-                    brokerTask.brokerTask(msg);
-                }
-            });
+            executor.execute(() -> brokerTask.brokerTask(msg));
         }
     }
 
