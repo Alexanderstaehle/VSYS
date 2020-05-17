@@ -1,17 +1,13 @@
 package aqua.blatt1.broker;
 
 import aqua.blatt1.common.Direction;
-import aqua.blatt1.common.msgtypes.DeregisterRequest;
-import aqua.blatt1.common.msgtypes.HandoffRequest;
-import aqua.blatt1.common.msgtypes.RegisterRequest;
-import aqua.blatt1.common.msgtypes.RegisterResponse;
+import aqua.blatt1.common.msgtypes.*;
 import aqua.blatt2.broker.PoisonPill;
 import messaging.Endpoint;
 import messaging.Message;
 
 import javax.swing.*;
 import java.net.InetSocketAddress;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -19,14 +15,15 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class Broker {
     Endpoint endpoint;
-    ClientCollection clientList;
+    ClientCollection<InetSocketAddress> clientList;
     Boolean stopRequest;
     ExecutorService executor;
     ReadWriteLock lock = new ReentrantReadWriteLock();
+    int idCounter = 0;
 
     public Broker() {
         endpoint = new Endpoint(4711);
-        clientList = new ClientCollection();
+        clientList = new ClientCollection<>();
         stopRequest = false;
         executor = Executors.newFixedThreadPool(5);
     }
@@ -46,7 +43,7 @@ public class Broker {
             }
 
             if (msg.getPayload() instanceof HandoffRequest) {
-                lock.writeLock();
+                lock.writeLock().lock();
                 handoffFish(msg);
                 lock.writeLock().unlock();
             }
@@ -74,22 +71,53 @@ public class Broker {
         InetSocketAddress receiverAddress;
         int index = clientList.indexOf(msg.getSender());
         if (direction == Direction.LEFT) {
-            receiverAddress = (InetSocketAddress) clientList.getLeftNeigbhorOf(index);
+            receiverAddress = clientList.getLeftNeigbhorOf(index);
         } else {
-            receiverAddress = (InetSocketAddress) clientList.getRightNeigbhorOf(index);
+            receiverAddress = clientList.getRightNeigbhorOf(index);
         }
         endpoint.send(receiverAddress, msg.getPayload());
     }
 
-    private void deregister(Message msg) {
-        clientList.remove(clientList.indexOf(((DeregisterRequest) msg.getPayload()).getId()));
-    }
-
     private void register(Message msg) {
         String id = "";
-        id = "tank" + UUID.randomUUID().toString();
-        clientList.add(id, msg.getSender());
-        endpoint.send(msg.getSender(), new RegisterResponse(id));
+        id = "tank" + idCounter;
+        idCounter++;
+
+        InetSocketAddress newTankAddress = msg.getSender();
+
+        clientList.add(id, newTankAddress);
+
+
+        InetSocketAddress leftNeighbor = clientList.getLeftNeigbhorOf(clientList.indexOf(newTankAddress));
+        InetSocketAddress rightNeighbor = clientList.getRightNeigbhorOf(clientList.indexOf(newTankAddress));
+
+        InetSocketAddress leftNeighborOfLeftNeighbor = clientList.getLeftNeigbhorOf(clientList.indexOf(leftNeighbor));
+        InetSocketAddress rightNeighborOfRightNeighbor = clientList.getRightNeigbhorOf(clientList.indexOf(rightNeighbor));
+
+
+        if (clientList.size() == 1) {
+            endpoint.send(newTankAddress, new Token());
+            endpoint.send(newTankAddress, new NeighborUpdate(newTankAddress, newTankAddress));
+        } else {
+            endpoint.send(leftNeighbor, new NeighborUpdate(leftNeighborOfLeftNeighbor, newTankAddress));
+            endpoint.send(rightNeighbor, new NeighborUpdate(newTankAddress, rightNeighborOfRightNeighbor));
+            endpoint.send(newTankAddress, new NeighborUpdate(leftNeighbor, rightNeighbor));
+        }
+        endpoint.send(newTankAddress, new RegisterResponse(id));
+    }
+
+    private void deregister(Message msg) {
+        InetSocketAddress deletableClient = msg.getSender();
+        InetSocketAddress leftNeighbor = clientList.getLeftNeigbhorOf(clientList.indexOf(deletableClient));
+        InetSocketAddress rightNeighbor = clientList.getRightNeigbhorOf(clientList.indexOf(deletableClient));
+
+        InetSocketAddress leftNeighborOfLeftNeighbor = clientList.getLeftNeigbhorOf(clientList.indexOf(leftNeighbor));
+        InetSocketAddress rightNeighborOfRightNeighbor = clientList.getRightNeigbhorOf(clientList.indexOf(rightNeighbor));
+
+        endpoint.send(leftNeighbor, new NeighborUpdate(leftNeighborOfLeftNeighbor, rightNeighbor));
+        endpoint.send(rightNeighbor, new NeighborUpdate(leftNeighbor, rightNeighborOfRightNeighbor));
+
+        clientList.remove(clientList.indexOf(((DeregisterRequest) msg.getPayload()).getId()));
     }
 
     public static void main(String[] args) {

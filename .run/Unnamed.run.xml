@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Unnamed" type="CompoundRunConfigurationType">
+    <toRun name="Broker" type="Application" />
+    <toRun name="Poisoner" type="Application" />
+    <toRun name="Aqualife" type="Application" />
+    <method v="2" />
+  </configuration>
+</component>
