@@ -3,10 +3,15 @@ package aqua.blatt1.client;
 import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
+import aqua.blatt1.common.RecordState;
+import aqua.blatt1.common.msgtypes.SnapshotCollector;
+import aqua.blatt1.common.msgtypes.SnapshotMarker;
 import aqua.blatt1.common.msgtypes.Token;
 import messaging.Endpoint;
 
@@ -24,6 +29,13 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     protected InetSocketAddress rightNeighbor;
     protected Boolean hasToken;
     protected Timer timer = new Timer();
+    public RecordState recordState = RecordState.IDLE;
+    public int localState;
+    public boolean initiatedSnapshot;
+    public boolean hasCollector;
+    public ExecutorService executor = Executors.newFixedThreadPool(5);
+    public int globalState;
+    public boolean globalStateReady;
 
     public TankModel(ClientCommunicator.ClientForwarder forwarder) {
         this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
@@ -49,6 +61,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     }
 
     synchronized void receiveFish(FishModel fish) {
+        System.out.println(recordState);
         fish.setToStart();
         fishies.add(fish);
     }
@@ -101,6 +114,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
                 update();
                 TimeUnit.MILLISECONDS.sleep(10);
             }
+            executor.shutdown();
         } catch (InterruptedException consumed) {
             // allow method to terminate
         }
@@ -124,5 +138,84 @@ public class TankModel extends Observable implements Iterable<FishModel> {
                 forwarder.sendToken(leftNeighbor, token);
             }
         }, 2000);
+    }
+
+    public void initiateSnapshot() {
+        if (recordState == RecordState.IDLE) {
+            localState = fishies.size();
+            initiatedSnapshot = true;
+            recordState = RecordState.BOTH;
+
+            forwarder.sendSnapshotMarker(leftNeighbor, new SnapshotMarker());
+            forwarder.sendSnapshotMarker(rightNeighbor, new SnapshotMarker());
+        }
+    }
+
+    public void receiveSnapshotMarker(InetSocketAddress sender, SnapshotMarker snapshotMarker) {
+        if (recordState == RecordState.IDLE) {
+            // lokaler snapshot
+            localState = fishies.size();
+
+            // Starte weitere Aufzeichnungskanäle
+
+            if (leftNeighbor.equals(rightNeighbor)) { // 2 Tanks
+                recordState = RecordState.RIGHT;
+                forwarder.sendSnapshotMarker(leftNeighbor, snapshotMarker);
+            } else {
+
+                if (sender.equals(leftNeighbor)) {
+                    recordState = RecordState.RIGHT;
+                } else if (sender.equals(rightNeighbor)) {
+                    recordState = RecordState.LEFT;
+                }
+
+
+                forwarder.sendSnapshotMarker(leftNeighbor, snapshotMarker);
+                forwarder.sendSnapshotMarker(rightNeighbor, snapshotMarker);
+            }
+        } else {
+            if (leftNeighbor.equals(rightNeighbor)) { // 2 Tanks
+                recordState = RecordState.IDLE;
+            } else {
+                if (sender.equals(leftNeighbor)) {
+                    if (recordState == RecordState.BOTH) {
+                        recordState = RecordState.RIGHT;
+                    }
+
+                    if (recordState == RecordState.LEFT)
+                        recordState = RecordState.IDLE;
+                } else if (sender.equals(rightNeighbor)) {
+                    if (recordState == RecordState.BOTH)
+                        recordState = RecordState.LEFT;
+
+                    if (recordState == RecordState.RIGHT)
+                        recordState = RecordState.IDLE;
+                }
+            }
+        }
+        if (recordState == RecordState.IDLE && initiatedSnapshot) {
+            forwarder.sendSnapshotCollector(leftNeighbor, new SnapshotCollector(localState));
+        }
+        System.out.println("Local State: " + localState);
+    }
+
+    public void receiveSnapshotCollector(SnapshotCollector snapshotCollector) {
+        hasCollector = true;
+        executor.execute(() -> {
+            while (hasCollector) {
+                if (recordState == RecordState.IDLE && !initiatedSnapshot) {
+                    int counter = snapshotCollector.getCounter() + localState;
+                    forwarder.sendSnapshotCollector(leftNeighbor, new SnapshotCollector(counter));
+                    hasCollector = false;
+                }
+            }
+        });
+
+        if (initiatedSnapshot) {
+            initiatedSnapshot = false;
+            globalState = snapshotCollector.getCounter();
+            System.out.println("Global State: " + globalState);
+            globalStateReady = true;
+        }
     }
 }

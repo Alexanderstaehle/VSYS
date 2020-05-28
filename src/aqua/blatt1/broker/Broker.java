@@ -113,9 +113,12 @@ public class Broker {
 
         InetSocketAddress leftNeighborOfLeftNeighbor = clientList.getLeftNeigbhorOf(clientList.indexOf(leftNeighbor));
         InetSocketAddress rightNeighborOfRightNeighbor = clientList.getRightNeigbhorOf(clientList.indexOf(rightNeighbor));
-
-        endpoint.send(leftNeighbor, new NeighborUpdate(leftNeighborOfLeftNeighbor, rightNeighbor));
-        endpoint.send(rightNeighbor, new NeighborUpdate(leftNeighbor, rightNeighborOfRightNeighbor));
+        if(clientList.size() == 2) {
+            endpoint.send(leftNeighbor, new NeighborUpdate(leftNeighbor, leftNeighbor));
+        } else {
+            endpoint.send(leftNeighbor, new NeighborUpdate(leftNeighborOfLeftNeighbor, rightNeighbor));
+            endpoint.send(rightNeighbor, new NeighborUpdate(leftNeighbor, rightNeighborOfRightNeighbor));
+        }
 
         clientList.remove(clientList.indexOf(((DeregisterRequest) msg.getPayload()).getId()));
     }
