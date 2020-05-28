@@ -10,6 +10,8 @@ import java.util.concurrent.TimeUnit;
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
 import aqua.blatt1.common.RecordState;
+import aqua.blatt1.common.ReferenceState;
+import aqua.blatt1.common.msgtypes.LocationRequest;
 import aqua.blatt1.common.msgtypes.SnapshotCollector;
 import aqua.blatt1.common.msgtypes.SnapshotMarker;
 import aqua.blatt1.common.msgtypes.Token;
@@ -36,11 +38,14 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     public ExecutorService executor = Executors.newFixedThreadPool(5);
     public int globalState;
     public boolean globalStateReady;
+    protected final HashMap fishReferences;
+
 
     public TankModel(ClientCommunicator.ClientForwarder forwarder) {
         this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
         this.forwarder = forwarder;
         this.hasToken = false;
+        this.fishReferences = new HashMap();
     }
 
     synchronized void onRegistration(String id) {
@@ -57,6 +62,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
                     rand.nextBoolean() ? Direction.LEFT : Direction.RIGHT);
 
             fishies.add(fish);
+            fishReferences.put(fish.getId(), ReferenceState.HERE);
         }
     }
 
@@ -64,6 +70,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
         System.out.println(recordState);
         fish.setToStart();
         fishies.add(fish);
+        fishReferences.put(fish.getId(), ReferenceState.HERE);
     }
 
     public String getId() {
@@ -95,6 +102,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     private void hasToken(FishModel fish) {
         if (hasToken) {
             forwarder.handOff(fish, leftNeighbor, rightNeighbor);
+            fishReferences.replace(fish.getId(), fish.getDirection() == Direction.LEFT ? ReferenceState.LEFT : ReferenceState.RIGHT);
         } else {
             fish.reverse();
         }
@@ -216,6 +224,27 @@ public class TankModel extends Observable implements Iterable<FishModel> {
             globalState = snapshotCollector.getCounter();
             System.out.println("Global State: " + globalState);
             globalStateReady = true;
+        }
+    }
+
+    public void locateFishGlobally(String fishId) {
+        if (fishReferences.get(fishId) == ReferenceState.HERE) {
+            locateFishLocally(fishId);
+        } else {
+            if (fishReferences.get(fishId) == ReferenceState.LEFT) {
+                forwarder.sendLocationRequest(leftNeighbor, fishId);
+            } else {
+                forwarder.sendLocationRequest(rightNeighbor, fishId);
+            }
+        }
+    }
+
+    public void locateFishLocally(String fishId) {
+        for (FishModel fish : this) {
+            if (fish.getId().equals(fishId)) {
+                fish.toggle();
+                break;
+            }
         }
     }
 }

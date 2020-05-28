@@ -1,5 +1,6 @@
 package aqua.blatt1.broker;
 
+import aqua.blatt1.client.TankModel;
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.msgtypes.*;
 import aqua.blatt2.broker.PoisonPill;
@@ -51,7 +52,17 @@ public class Broker {
             if (msg.getPayload() instanceof PoisonPill) {
                 System.exit(0);
             }
+
+            if (msg.getPayload() instanceof NameResolutionRequest) {
+                determineTankAddress(msg);
+            }
         }
+    }
+
+    private void determineTankAddress(Message msg) {
+        String tankId = ((NameResolutionRequest) msg.getPayload()).getTankId();
+        InetSocketAddress tankAddress = clientList.getClient(clientList.indexOf(tankId));
+        endpoint.send(msg.getSender(), new NameResolutionResponse(((NameResolutionRequest) msg.getPayload()).getRequestId(), tankAddress));
     }
 
     public void broker() {
@@ -113,7 +124,7 @@ public class Broker {
 
         InetSocketAddress leftNeighborOfLeftNeighbor = clientList.getLeftNeigbhorOf(clientList.indexOf(leftNeighbor));
         InetSocketAddress rightNeighborOfRightNeighbor = clientList.getRightNeigbhorOf(clientList.indexOf(rightNeighbor));
-        if(clientList.size() == 2) {
+        if (clientList.size() == 2) {
             endpoint.send(leftNeighbor, new NeighborUpdate(leftNeighbor, leftNeighbor));
         } else {
             endpoint.send(leftNeighbor, new NeighborUpdate(leftNeighborOfLeftNeighbor, rightNeighbor));
