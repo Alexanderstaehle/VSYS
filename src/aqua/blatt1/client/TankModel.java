@@ -10,12 +10,7 @@ import java.util.concurrent.TimeUnit;
 import aqua.blatt1.common.Direction;
 import aqua.blatt1.common.FishModel;
 import aqua.blatt1.common.RecordState;
-import aqua.blatt1.common.ReferenceState;
-import aqua.blatt1.common.msgtypes.LocationRequest;
-import aqua.blatt1.common.msgtypes.SnapshotCollector;
-import aqua.blatt1.common.msgtypes.SnapshotMarker;
-import aqua.blatt1.common.msgtypes.Token;
-import messaging.Endpoint;
+import aqua.blatt1.common.msgtypes.*;
 
 public class TankModel extends Observable implements Iterable<FishModel> {
 
@@ -38,18 +33,24 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     public ExecutorService executor = Executors.newFixedThreadPool(5);
     public int globalState;
     public boolean globalStateReady;
-    protected final HashMap fishReferences;
+    protected final HashMap homeAgent;
 
 
     public TankModel(ClientCommunicator.ClientForwarder forwarder) {
         this.fishies = Collections.newSetFromMap(new ConcurrentHashMap<FishModel, Boolean>());
         this.forwarder = forwarder;
         this.hasToken = false;
-        this.fishReferences = new HashMap();
+        this.homeAgent = new HashMap();
     }
 
-    synchronized void onRegistration(String id) {
+    synchronized void onRegistration(String id, long lease) {
         this.id = id;
+        timer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                forwarder.register();
+            }
+        }, lease-1000);
         newFish(WIDTH - FishModel.getXSize(), rand.nextInt(HEIGHT - FishModel.getYSize()));
     }
 
@@ -62,7 +63,7 @@ public class TankModel extends Observable implements Iterable<FishModel> {
                     rand.nextBoolean() ? Direction.LEFT : Direction.RIGHT);
 
             fishies.add(fish);
-            fishReferences.put(fish.getId(), ReferenceState.HERE);
+            homeAgent.put(fish.getId(), null);
         }
     }
 
@@ -70,7 +71,11 @@ public class TankModel extends Observable implements Iterable<FishModel> {
         System.out.println(recordState);
         fish.setToStart();
         fishies.add(fish);
-        fishReferences.put(fish.getId(), ReferenceState.HERE);
+        if (homeAgent.containsKey(fish.getId())) {
+            homeAgent.replace(fish.getId(), null);
+        } else {
+            forwarder.sendNameResolutionRequest(fish.getTankId(), fish.getId());
+        }
     }
 
     public String getId() {
@@ -102,7 +107,6 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     private void hasToken(FishModel fish) {
         if (hasToken) {
             forwarder.handOff(fish, leftNeighbor, rightNeighbor);
-            fishReferences.replace(fish.getId(), fish.getDirection() == Direction.LEFT ? ReferenceState.LEFT : ReferenceState.RIGHT);
         } else {
             fish.reverse();
         }
@@ -228,15 +232,12 @@ public class TankModel extends Observable implements Iterable<FishModel> {
     }
 
     public void locateFishGlobally(String fishId) {
-        if (fishReferences.get(fishId) == ReferenceState.HERE) {
+        if (homeAgent.get(fishId) == null) {
             locateFishLocally(fishId);
         } else {
-            if (fishReferences.get(fishId) == ReferenceState.LEFT) {
-                forwarder.sendLocationRequest(leftNeighbor, fishId);
-            } else {
-                forwarder.sendLocationRequest(rightNeighbor, fishId);
-            }
+            forwarder.sendLocationRequest((InetSocketAddress) homeAgent.get(fishId), fishId);
         }
+
     }
 
     public void locateFishLocally(String fishId) {
@@ -246,5 +247,18 @@ public class TankModel extends Observable implements Iterable<FishModel> {
                 break;
             }
         }
+    }
+
+    public void sendLocationUpdate(InetSocketAddress tankAddress, String fishId) {
+        forwarder.sendLocationUpdate(tankAddress, fishId);
+    }
+
+    public void handleLocationUpdate(String fishId, InetSocketAddress sender) {
+        homeAgent.replace(fishId, sender);
+    }
+
+    public void handleLeasingRunOut() {
+        forwarder.deregister(id);
+        System.exit(0);
     }
 }

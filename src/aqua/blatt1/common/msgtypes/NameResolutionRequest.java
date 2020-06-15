@@ -16,7 +16,7 @@ public class NameResolutionRequest implements Serializable {
     }
 
 
-    NameResolutionRequest(String tankId, String requestId){
+    public NameResolutionRequest(String tankId, String requestId){
         this.tankId = tankId;
         this.requestId = requestId;
     }

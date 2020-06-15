@@ -9,6 +9,8 @@ import messaging.Message;
 
 import javax.swing.*;
 import java.net.InetSocketAddress;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -21,6 +23,8 @@ public class Broker {
     ExecutorService executor;
     ReadWriteLock lock = new ReentrantReadWriteLock();
     int idCounter = 0;
+    protected Timer timer = new Timer();
+    long leaseDuration = 10000;
 
     public Broker() {
         endpoint = new Endpoint(4711);
@@ -66,6 +70,7 @@ public class Broker {
     }
 
     public void broker() {
+        cleanup();
         executor.execute(() -> {
             JOptionPane.showMessageDialog(null, "Ok um Server zu beenden");
             stopRequest = true;
@@ -75,6 +80,25 @@ public class Broker {
             BrokerTask brokerTask = new BrokerTask();
             executor.execute(() -> brokerTask.brokerTask(msg));
         }
+    }
+
+    private void cleanup() {
+        timer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+
+                long currentTimestamp = System.currentTimeMillis();
+                if (clientList.size() > 0) {
+                    for (int i = 0; i < clientList.size(); i++) {
+                        long clientTimestamp = clientList.getLease(i);
+                        long leasingTime = currentTimestamp - clientTimestamp;
+                        if (leasingTime > 10000) {
+                            endpoint.send((InetSocketAddress) clientList.getClient(i), new LeasingRunOut());
+                        }
+                    }
+                }
+            }
+        }, 0, 3000);
     }
 
     private void handoffFish(Message msg) {
@@ -94,9 +118,15 @@ public class Broker {
         id = "tank" + idCounter;
         idCounter++;
 
-        InetSocketAddress newTankAddress = msg.getSender();
+        long leaseStart = System.currentTimeMillis();
 
-        clientList.add(id, newTankAddress);
+        InetSocketAddress newTankAddress = msg.getSender();
+        int index = clientList.indexOf(newTankAddress);
+        if (index == -1) {
+            clientList.add(id, newTankAddress, leaseStart);
+        } else {
+            clientList.updateLease(index, leaseStart);
+        }
 
 
         InetSocketAddress leftNeighbor = clientList.getLeftNeigbhorOf(clientList.indexOf(newTankAddress));
@@ -114,7 +144,7 @@ public class Broker {
             endpoint.send(rightNeighbor, new NeighborUpdate(newTankAddress, rightNeighborOfRightNeighbor));
             endpoint.send(newTankAddress, new NeighborUpdate(leftNeighbor, rightNeighbor));
         }
-        endpoint.send(newTankAddress, new RegisterResponse(id));
+        endpoint.send(newTankAddress, new RegisterResponse(id, leaseDuration));
     }
 
     private void deregister(Message msg) {
