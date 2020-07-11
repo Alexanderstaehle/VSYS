@@ -1,10 +1,9 @@
 package aqua.blatt1.broker;
 
-import aqua.blatt1.client.TankModel;
 import aqua.blatt1.common.Direction;
+import aqua.blatt1.common.SecureEndpoint;
 import aqua.blatt1.common.msgtypes.*;
 import aqua.blatt2.broker.PoisonPill;
-import messaging.Endpoint;
 import messaging.Message;
 
 import javax.swing.*;
@@ -17,7 +16,7 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class Broker {
-    Endpoint endpoint;
+    SecureEndpoint endpoint;
     ClientCollection<InetSocketAddress> clientList;
     Boolean stopRequest;
     ExecutorService executor;
@@ -27,7 +26,7 @@ public class Broker {
     long leaseDuration = 10000;
 
     public Broker() {
-        endpoint = new Endpoint(4711);
+        endpoint = new SecureEndpoint(4711);
         clientList = new ClientCollection<>();
         stopRequest = false;
         executor = Executors.newFixedThreadPool(5);
